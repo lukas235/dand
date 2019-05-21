@@ -1,0 +1,961 @@
+---
+title: "Data Analysis for Prosper Loan Data Set"
+author: "Lukas Stylianou"
+date: "January 25, 2019"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: lumen
+    highlight: textmate
+---
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(dplyr)
+library(scales)
+library(memisc)
+
+# knitr: Suppress code/messages/warnings 
+knitr::opts_chunk$set( echo=FALSE,warning=FALSE,message=FALSE)
+
+# Set default plot options and center them
+knitr::opts_chunk$set(fig.width=9,fig.height=5,fig.path='Figs/',
+                      fig.align='center',tidy=TRUE,
+                      echo=FALSE,warning=FALSE,message=FALSE)
+
+# Don't use scientific notations for numbers
+options(scipen = 999)
+
+```
+
+```{r echo=FALSE, Load_the_Data}
+# Load the Data
+df <- read.csv('prosperLoanData.csv')
+# head(df, 50)
+```
+
+This report explores the Prosper Loan data set which contains 113,937 loans with
+81 variables on each loan, including loan amount, borrower rate (or interest 
+rate), current loan status, borrower income, borrower employment status, 
+borrower credit history, and the latest payment information.
+
+# Univariate Plots Section
+
+```{r}
+dim(df)
+```
+
+
+```{r}
+str(df)
+```
+
+## Info About Loans
+Let's look at the distribution of loans according to their terms in months.
+
+```{r Loan terms, message=FALSE, warning=FALSE}
+
+table(df$Term)
+
+# Simple bar plot
+ggplot(aes(x = as.factor(Term)), data = df) +
+  geom_bar(color = 'black')
+
+```
+
+It is also interesting to see, how high the loan amounts are (with different bin 
+sizes \$1000 and \$5000). Most loans are under \$5000.
+
+```{r}
+
+# Compare Loan amounts in hists with different bin sizes
+amt1 <- ggplot(aes(x = LoanOriginalAmount), data = df) +
+  geom_histogram(binwidth = 1000, breaks = seq(0, 30000, 1000), color = 'black')
+amt2 <- ggplot(aes(x = LoanOriginalAmount), data = df) +
+  geom_histogram(binwidth = 5000, breaks = seq(0, 30000, 5000), color = 'black')
+grid.arrange(amt1, amt2, ncol = 1)
+
+```
+
+
+Loans range from \$1000 to \$35000 max. The median is \$6500.
+
+```{r}
+
+summary(df$LoanOriginalAmount)
+
+```
+
+
+Applying log scale on the histogram does not make any signs of normality visible
+.
+
+```{r}
+
+# Log scale on loan amt
+ggplot(aes(x = LoanOriginalAmount), data = df) +
+  geom_histogram(bins = 11, color = 'black') +
+  scale_x_log10()
+
+```
+
+Distribution of Borrower annual rates shows that most rates range from ~0.15% to
+~0.2%.
+
+```{r warning=FALSE}
+
+# Overall comparison between Rates
+p1 <- ggplot() + 
+  geom_histogram(aes(x=BorrowerAPR, y=..count.., fill="grey", colour="black"), 
+                 alpha=.6, data=df, stat = "bin", 
+                 binwidth = .025, boundary = 0) +
+  scale_colour_manual(name="Counts", values=c("grey" = "grey", "black"="black"),
+                      labels=c("black"="BorrowerAPR", "grey"="BorrowerAPR")) +
+  scale_fill_manual(name="Counts", values=c("grey" = "grey", "black"="black"), 
+                    labels=c("black"="BorrowerAPR", "grey"="BorrowerAPR"))
+  
+p2 <- ggplot() + 
+  geom_histogram(aes(x=BorrowerRate, y=..count.., fill="r", colour="r"), 
+                 alpha=.3, data=df, stat = "bin", 
+                 binwidth = .025, boundary = 0) +
+  geom_histogram(aes(x=LenderYield,y=..count.., fill="b", colour="b"), alpha=.3,
+                 data=df, stat = "bin", binwidth = .025, boundary = 0) +
+  scale_colour_manual(name="Counts", values=c("r" = "red", "b"="blue"), 
+                      labels=c("b"="LenderYield", "r"="BorrowerRate")) +
+  scale_fill_manual(name="Counts", values=c("r" = "red", "b"="blue"), 
+                    labels=c("b"="LenderYield", "r"="BorrowerRate")) +
+  xlab('LenderYield | BorrowerRate')
+  
+grid.arrange(p1, p2, ncol = 1)
+
+```
+
+Loans per year/month
+It turns out that date is in the date format. We will extract years and months
+to create plots for time-series and seasonality. Most loans were taken in 2013.
+Also it turns out, that the number of loans increases with the course of the
+year and that most people take out a loan in October and December.
+It would be interesting to analyse how high the total amount of all loans was
+per year and what the average is. Year 2014 was removed from the monthly 
+perspective, as it was not finished completely when the dataset was created and 
+there would #todo: to univariate
+Average loan amounts per year. And total amounts. It is well possible, that 2014
+is not over yet, as the sum of loans is not quite as high as 2013, however, the
+average is so far still higher than 2013.
+
+```{r message=FALSE, warning=FALSE}
+
+# Extract Year, Month
+df$Year <- format(as.Date(df$LoanOriginationDate, 
+                          format="%Y-%m-%d %H:%M:%S"),"%Y")
+df$Year <- as.numeric(df$Year)
+df$Month <- format(as.Date(df$LoanOriginationDate, 
+                           format="%Y-%m-%d %H:%M:%S"),"%m")
+
+# Compare Yearly and Monthly impacts on loans
+t1 <- ggplot(aes(x = Year), data = df) +
+  geom_bar() +
+  scale_x_continuous(breaks = seq(2005, 2014))
+  geom_histogram(stat = 'count')
+
+t2 <- ggplot(aes(x = Month), data = subset(df, Year < 2014 & Year > 2006)) +
+  geom_histogram(stat = 'count', binwidth = 1)
+
+df.yearly <- df %>%
+  group_by(Year) %>%
+  summarise(mean_amt = mean(LoanOriginalAmount),
+            median_amt = median(LoanOriginalAmount),
+            min_amt = min(LoanOriginalAmount),
+            max_amt = max(LoanOriginalAmount),
+            sum_amt = sum(LoanOriginalAmount),
+            n = n()) %>%
+  arrange(Year)
+
+
+t3 <- ggplot(data = df.yearly) +
+  geom_bar(aes(x = Year, y = mean_amt), stat = 'identity') +
+  scale_x_continuous(breaks = seq(2005,2014,1))
+
+t4 <- ggplot(data = df.yearly) +
+  geom_bar(aes(x = Year, y = sum_amt), stat = 'identity') +
+  scale_x_continuous(breaks = seq(2005,2014,1))
+
+grid.arrange(t1, t4, t3, t2, ncol = 1)
+
+```
+
+The bulk of the distribution of the prosper score lies in the middle. Most of
+people get average scores.
+
+```{r warning=FALSE}
+
+# Prosper score hist
+ggplot(aes(x = ProsperScore), data = df) +
+  geom_histogram(bins = 11, color = 'black') +
+  scale_x_continuous(breaks = seq(1,11,1))
+
+```
+
+Taking a look at the usage categories of loans, it turns out that more than 50%
+are user for debt consolidation.
+
+```{r}
+
+lab <- c('Debt Consolidation', 
+       'Home Improvement',
+       'Business',
+       'Personal Loan',
+       'Student Use',
+       'Auto',
+       'Baby&Adoption',
+       'Boat',
+       'Cosmetic Procedure',
+       'Engagement Ring',
+       'Green Loans',
+       'Household Expenses',
+       'Large Purchases',
+       'Medical/Dental',
+       'Motorcycle',
+       'RV',
+       'Taxes',
+       'Vacation',
+       'Wedding Loans',
+       'Other',
+       'Not Available')
+
+# Create new columns with text categories
+df$ListingCategory <- factor(df$ListingCategory..numeric., 
+                            levels = c(1:6,8:20,7,0), labels = lab)
+
+ggplot(aes(x = df$ListingCategory, ..count.. / nrow(df)), data = df) +
+  geom_bar() +
+  scale_y_sqrt() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1)) +
+  xlab("Listing Category") +
+  ylab("Count") +
+  coord_flip()
+
+```
+
+## Info About Borrowers
+Most of the recipients are employed, however they also do not specify on the
+type of their emplyoment. It would be interesting to find out, how long
+employment status last depending on each type. There are many empty employment
+types which were changed to 'Not available' in order to clean the data.
+
+```{r}
+
+df$EmploymentStatus[df$EmploymentStatus == ''] <- 'Not available'
+ggplot(aes(x = EmploymentStatus), data = df) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_bar()
+
+```
+
+The incomes do not seem to be ordered. This needs to be fixed. Also, there is a
+group labeled as 'Not employed'. One has to ask, whether to join this group with
+the $0 group, however, it can not be said whether the 'Not employed' group can
+be treated as such, as they may have other income sources (e.g. stocks, rental 
+income, ...)
+
+```{r}
+
+table(df$IncomeRange)
+
+```
+
+Looking at the distribution of income ranges, most people earn between \$25000
+and \$49999. The second larges group ranges from \$50000 to \$74999. It would
+be interesting to see, how the different income ranges are composed in terms
+of employment status, which we will see in the multi-variate part of the
+analysis.
+
+```{r IncomeRange, warning=FALSE}
+
+df$IncomeRangeOrdered <- ordered(df$IncomeRange, levels = c("Not employed",
+                                                            "$0",
+                                                            "$1-24,999",
+                                                            "$25,000-49,999",
+                                                            "$50,000-74,999",
+                                                            "$75,000-99,999",
+                                                            "$100,000+",
+                                                            "Not displayed"))
+ggplot(aes(x = IncomeRangeOrdered), data = df) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_histogram(stat = 'count')
+
+```
+
+```{r warning=FALSE}
+
+p1 <- ggplot() + 
+  geom_histogram(aes(x=BorrowerAPR, y=..count.., fill="grey", colour="black"), 
+                 alpha=.6, data=df, stat = "bin", 
+                 binwidth = .025, boundary = 0) +
+  scale_colour_manual(name="Counts", values=c("grey" = "grey", "black"="black"),
+                      labels=c("black"="BorrowerAPR", "grey"="BorrowerAPR")) +
+  scale_fill_manual(name="Counts", values=c("grey" = "grey", "black"="black"),
+                    labels=c("black"="BorrowerAPR", "grey"="BorrowerAPR"))
+
+
+d1 <- ggplot() +
+  geom_histogram(aes(x = CurrentDelinquencies, y=..count.., fill = 'red', 
+                     colour = 'red'), alpha = .2, stat = "bin", 
+                 data = df, boundary = 0, binwidth = 5) +
+  geom_histogram(aes(x = DelinquenciesLast7Years, y=..count.., fill = 'blue', 
+                     colour = 'blue'), alpha = .2, data = df, boundary = 0, 
+                 binwidth = 5) +
+  scale_y_log10(breaks = c(10, 100, 1000, 10000)) +
+  scale_colour_manual(name="Counts", values=c("red" = "red", "blue"="blue"), 
+    labels=c("blue"="DelinquenciesLast7Years", "red"="CurrentDelinquencies")) +
+  scale_fill_manual(name="Counts", values=c("red" = "red", "blue"="blue"), 
+    labels=c("blue"="DelinquenciesLast7Years", "red"="CurrentDelinquencies"))
+
+d2 <- ggplot(data = df) +
+  geom_histogram(aes(x = PublicRecordsLast10Years, color = 'blue', 
+                     fill = 'blue'), alpha = .2, boundary = 0, binwidth = 1) +
+  geom_histogram(aes(x = PublicRecordsLast12Months, color = 'red', 
+                     fill = 'red'), alpha = .2, boundary = 0, binwidth = 1) +
+  scale_x_continuous(limits = c(0, 20)) +
+  scale_y_log10(breaks = c(10, 100, 1000, 10000)) +
+  scale_colour_manual(name="Counts", values=c("red" = "red", "blue"="blue"), 
+                      labels=c("blue"="PublicRecordsLast10Years", 
+                               "red"="PublicRecordsLast12Months")) +
+  scale_fill_manual(name="Counts", values=c("red" = "red", "blue"="blue"), 
+                    labels=c("blue"="PublicRecordsLast10Years", 
+                             "red"="PublicRecordsLast12Months"))
+
+grid.arrange(d1, d2, ncol = 1)
+
+```
+
+Open vs Current Credit lines
+Open and current credit lines are a right-skewed distribution.
+
+```{r warning=FALSE}
+
+ggplot( data = df) +
+  geom_histogram(aes(x = CurrentCreditLines, fill = 'blue'), 
+                 alpha = .3, binwidth = 2, boundary = 0) +
+  geom_histogram(aes(x = OpenCreditLines, fill = 'red'), 
+                 alpha = .3, binwidth = 2, boundary = 0) +
+  coord_cartesian(xlim = c(0,40)) +
+  scale_x_continuous(breaks = seq(0, 40, 2)) +
+  scale_colour_manual(name="Counts", values=c("red" = "red", "blue"="blue"),
+                      labels=c("blue"="CurrentCreditLines",
+                               "red"="OpenCreditLines")) +
+  scale_fill_manual(name="Counts", values=c("red" = "red", "blue"="blue"), 
+                    labels=c("blue"="CurrentCreditLines", 
+                             "red"="OpenCreditLines"))
+
+```
+
+
+Home ownership is around 50-50 (Slightly more home owners)
+
+```{r}
+
+summary(df$IsBorrowerHomeowner)
+
+```
+
+Most borrowers have high bank card utilization. Utilisation over 1.0 would then
+mean overdrafting the bank account.
+
+```{r message=FALSE, warning=FALSE}
+
+# Bankcard utilisation bins
+ggplot(aes(x = BankcardUtilization), data = df) +
+  geom_histogram(binwidth = .2, color = 'black', boundary = 0) +
+  scale_x_continuous(limits = c(0, 1.5))
+
+```
+
+Most people take loans as individuals.
+
+```{r message=FALSE, warning=FALSE}
+
+# Simple True False hist
+ggplot(aes(x = CurrentlyInGroup), data = df) +
+  geom_histogram(stat = 'count')
+
+```
+
+# Univariate Analysis
+
+### What is the structure of your dataset?
+
+The dataset contains 113937 observations of 81 features.
+
+### What is/are the main feature(s) of interest in your dataset?
+
+BorrowerAPR
+
+BorrowerRate
+
+LenderYield
+
+ProsperScore
+
+EmploymentStatus
+
+EmploymentStatusDuration
+
+BankcardUtilization
+
+IncomeRange
+
+LoanOriginalAmount
+
+LoanOriginationDate
+
+Term
+
+
+### What other features in the dataset do you think will help support your \
+investigation into your feature(s) of interest?
+
+ListingCategory
+
+IsBorrowerHomeowner
+
+CurrentlyInGroup
+
+CurrentDelinquencies
+
+DelinquenciesLast7Years
+
+PublicRecordsLast12Months
+
+PublicRecordsLast10Years
+
+AvailableBankcardCredit
+
+CurrentCreditLines
+
+OpenCreditLines
+
+
+### Did you create any new variables from existing variables in the dataset?
+Year
+
+Month
+
+
+### Of the features you investigated, were there any unusual distributions? \
+Did you perform any operations on the data to tidy, adjust, or change the form \
+of the data? If so, why did you do this?
+Employment Status had an empty values issue which is why they were changed to 
+"Not available" to match the existing variable.
+As Income Range was unordered, the ordering was adjusted and 100k+ incomes were
+put to the right position.
+Also, the date column was unusable which is why Year and Month were extracted
+and put into separate columns.
+Listing Categories were converted from numerical values to strings, in order
+to understand the different categories better in the plot.
+
+# Bivariate Plots Section
+
+As "Not employed" is much steeper than Employed and e.g. full time this suggests
+that most people are fortunately unemployed only for a relatively short time.
+Also part time employment does not seem to last as long as full time, having 
+bulk of distribution closer to the right.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# wrap Duration & Density over Employment Status 
+ggplot(aes(x = EmploymentStatusDuration, y = ..density.. ), 
+       data = subset(df, EmploymentStatus != 'Not available')) +
+  geom_freqpoly(binwidth = 30) +
+  scale_x_continuous(limits = c(0, 365)) +
+  facet_wrap(~ EmploymentStatus)
+```
+
+The borrower annual rate decreases with the increase in their score. This is
+also a moderate correlation of 0.65.
+
+```{r message=FALSE, warning=FALSE}
+
+# Analyse relationship between Score and APR
+cor.test(df$ProsperScore, df$BorrowerAPR)
+
+ggplot(aes(x = ProsperScore, y = BorrowerAPR), data = df) +
+  geom_jitter(alpha = .02) +
+  coord_cartesian(ylim = c(0.05, 0.4)) +
+  scale_x_continuous(breaks = seq(1,11,1)) +
+  geom_smooth()
+
+```
+
+Borrower Rate (obviously) has highly linear relation to Lender yield, however, there are
+some values, which are not on the line... We will analyse this phenomenon in the
+multi variate analysis.
+
+```{r}
+
+# Analyse relation between Rate and Yield
+cor.test(df$BorrowerRate, df$LenderYield)
+
+ggplot(aes(x = BorrowerRate, y = LenderYield), data = df) +
+  geom_jitter(alpha = .02) +
+  coord_cartesian(xlim = c(0.05, 0.4), ylim = c(0.05, 0.4))
+
+```
+
+Thers is slight correlation between loan amount and and APR.
+
+```{r}
+
+cor.test(df$BorrowerAPR, df$LoanOriginalAmount)
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+# Relation between APR and Amount
+ggplot(aes(y = BorrowerAPR, x = LoanOriginalAmount), data = df) +
+  geom_jitter(alpha = .03, size = 1) +
+  geom_smooth()
+
+```
+
+Mean APR had its highest point in 2011 and then decreased again.
+
+```{r message=FALSE, warning=FALSE}
+
+# Yearly trend of rates
+cor.test(df$Year, df$BorrowerAPR)
+
+df.apr <- df %>%
+  group_by(Year) %>%
+  summarise(mean_apr = mean(BorrowerAPR),
+            median_apr = median(BorrowerAPR),
+            min_apr = min(BorrowerAPR),
+            max_apr = max(BorrowerAPR),
+            n = n()) %>%
+  arrange(Year)
+
+ggplot(data = df.apr) +
+  geom_line(aes(x = Year, y = mean_apr)) +
+  geom_line(aes(x = Year, y = min_apr), linetype = 2, color = 'grey') +
+  geom_line(aes(x = Year, y = max_apr), linetype = 2, color = 'grey') +
+  scale_x_continuous(limits = c(2007, 2014), breaks = seq(2007, 2014, 1))
+
+```
+
+Most borrowers have less than 50 Credit lines and less than 25 delinquencies in 
+the past 7 years.
+
+```{r message=FALSE, warning=FALSE}
+
+# Ratio of CreditLines and Delinquencies
+ggplot(aes(x = TotalCreditLinespast7years, y = DelinquenciesLast7Years), data = df) +
+  geom_point(alpha = .05)
+
+```
+
+People with higher bakcard utilisation tend to have higher loan rates.
+
+```{r message=FALSE, warning=FALSE}
+
+# Relation between Banckard utilisation and APR
+cor.test(df$BankcardUtilization, df$BorrowerAPR)
+
+ggplot(aes(x = BankcardUtilization, y = BorrowerAPR), data = df) +
+  geom_point(alpha = .01) +
+  scale_x_continuous(limits = c(0,1.5)) +
+  geom_smooth()
+
+```
+
+People with more income tend to borrow higher amounts. Only people earning over
+100k got loans higher than 25k.
+
+
+```{r message=FALSE, warning=FALSE}
+
+# Plot Income Ranges and Loan Amount incl. mean
+ggplot(aes(x = IncomeRangeOrdered, y = LoanOriginalAmount), data = df) +
+  geom_boxplot() +
+  stat_summary(fun.y = mean, geom = 'point', shape = 4) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Borrowers with higher income also get better anual rates. The fact that people
+with an income of $0 get low rates could be that there are many students in this
+group who get cheap student loans.
+
+```{r message=FALSE, warning=FALSE}
+
+# Plot Income ranges and APR including mean
+ggplot(aes(x = IncomeRangeOrdered, y = BorrowerAPR), data = df) +
+  geom_boxplot() +
+  stat_summary(fun.y = mean, geom = 'point', shape = 4) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Prosper Score depends on income. If score is smaller than 50k, it stays the same
+on average. It is also the same for ranges from 50k to 75k. Average is
+highest above 100k.
+
+```{r message=FALSE, warning=FALSE}
+
+# Plot income range and score including mean
+ggplot(aes(x = IncomeRangeOrdered, y = ProsperScore), data = df) +
+  geom_boxplot() +
+  stat_summary(fun.y = mean, geom = 'point', shape = 4) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+On log scale, delinquencies become better visible. However, they do not really
+vary visibly among income ranges.
+
+```{r message=FALSE, warning=FALSE}
+
+# Plot income range and delinquencies incl. mean
+ggplot(aes(x = IncomeRangeOrdered, y = DelinquenciesLast7Years), data = df) +
+  scale_y_log10() +
+  geom_boxplot() +
+  stat_summary(fun.y = mean, geom = 'point', shape = 4) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+
+# Bivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the \
+investigation. How did the feature(s) of interest vary with other features in \
+the dataset?
+
+It turns out that people with higher income on average get higher amounts and
+better rates for loans.
+
+### Did you observe any interesting relationships between the other features \
+(not the main feature(s) of interest)?
+
+Loan rates increased until 2011 and then decreased again. Maybe this is a
+consequence of the financial crisis around 2008.
+
+### What was the strongest relationship you found?
+BorrowerRate, LenderYield -> 0.99
+BorrowerAPR, ProsperScore -> -0.67
+ProsperScore, LoanOriginalAmount -> -0.32
+
+# Multivariate Plots Section
+
+As "Not employed" and "$0" are not of the same quality, the analysis of 
+employment statuses was conducted to see the composition of different statuses.
+
+```{r message=FALSE, warning=FALSE}
+
+# Look at composition of different Income Ranges in terms of employment status
+ggplot(aes(x = IncomeRangeOrdered, fill = EmploymentStatus), data = df) +
+  geom_histogram(stat = 'count') +
+  scale_y_log10(labels = scales::scientific_format()) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Borrower rate is strictly linear to the Lender Yield. However, if there
+is no score available, the lender yield seems to deviate from the ideal margin 
+line as can be seen in the following two plots. The upper one has the NA Prosper
+Score values removed while the lower one incorporates them as grey dots.
+
+```{r}
+
+# relation between rate and yield with AND without NA data
+n1 <- ggplot(aes(x = BorrowerRate, y = LenderYield, color = ProsperScore), data = subset(df, !is.na(ProsperScore))) +
+  geom_jitter(alpha = .02) +
+  coord_cartesian(xlim = c(0.05, 0.4), ylim = c(0.05, 0.4))
+
+n2 <- ggplot(aes(x = BorrowerRate, y = LenderYield, color = ProsperScore), data = df) +
+  geom_jitter(alpha = .02) +
+  coord_cartesian(xlim = c(0.05, 0.4), ylim = c(0.05, 0.4))
+
+grid.arrange(n1, n2, ncol = 1)
+
+```
+
+Relationship between BorrowerAPR, Loan Amount and Score shows that APR slightly 
+decreases when amount increases and when score increases. 
+
+```{r}
+
+# Scatterplot - Original Loan Amount and Borrow APR, by Prosper Score
+ggplot(aes(x = LoanOriginalAmount, y = BorrowerAPR, color = ProsperScore),
+       data = subset(df, !is.na(ProsperScore))) +
+  geom_jitter(alpha = .1) +
+  scale_color_gradient2("Prosper\nScore",
+        midpoint = median(subset(df,!is.na(ProsperScore))$ProsperScore))
+
+```
+
+Long term loans (60 months) tend to have higher amounts than shorter loans (36 
+months). Short term loans (12 tend to have the lowest amounts).
+
+```{r echo=FALSE, Multivariate_Plots}
+
+# look at term based on amount & apr
+ggplot(aes(x = LoanOriginalAmount, y = BorrowerAPR, color = as.factor(Term)),
+       data = subset(df, !is.na(ProsperScore))) +
+  geom_jitter(alpha = 1) +
+  scale_color_brewer(palette = 'Set1')
+
+```
+
+When comparing Income Ranges in terms of loan amounts, it can be seen that the
+bulks of the high income ranges are more to the right side (higher loans) and 
+the low income ranges on the left side (lower loans).
+
+```{r}
+
+# Density - Original Loan Amount, by Income Range (Log 10  scale)
+ggplot(aes(x = LoanOriginalAmount, y = ..density.., color = IncomeRangeOrdered),
+       data = subset(df, IncomeRangeOrdered != "Not employed" & 
+                       IncomeRangeOrdered != "Not displayed")) +
+  scale_x_log10() +
+  geom_freqpoly(bins = 8) +
+  scale_color_brewer(palette = "RdYlBu", direction = -1, name = "Income\nRange") +
+  theme_dark()
+
+```
+
+
+Bank card utilisation per income range shows that higher income ranges have a 
+larger bulk at high credit card utilisation rates.
+
+```{r message=FALSE, warning=FALSE}
+
+# density distribution of bankcard utilisation wrapped by income
+ggplot(aes(x = BankcardUtilization, y = ..density..), 
+       data = subset(df, !is.na(IncomeRangeOrdered))) +
+  geom_freqpoly(binwidth = .1) +
+  scale_x_continuous(limits = c(0,1.5)) +
+  facet_wrap(~ IncomeRangeOrdered)
+
+```
+
+Mean loan amount per year per income range again clearly shows, that higher
+income ranges take get higher loans. Also it can be seen, that there is no
+value for $0 for 2014. The group is not very realistic, which may be why it was
+dropped. "Not displayed" shows a lack of data before 2007.
+
+```{r}
+
+# yearly trend of mean amounts by income
+ggplot(aes(x = Year, y = LoanOriginalAmount), data = df) +
+  geom_line(stat = 'summary', fun.y = mean, aes(color = IncomeRangeOrdered)) +
+  scale_x_continuous(breaks = seq(2005,2014,1))
+
+```
+
+Relationship between borrower rate, term and its APR Different Terms
+are clustered in this plot based on their Rate/APR ratio.
+
+```{r message=FALSE, warning=FALSE}
+
+# borrower rate by apr colored by term
+ggplot(aes(x = BorrowerRate, y = BorrowerAPR, color = Term), data = df) +
+  geom_point()
+
+```
+
+Lower income is connected to lower employment duration.
+```{r message=FALSE, warning=FALSE}
+
+# income by employment status density
+df.empl <- subset(df, EmploymentStatus == 'Employed' | 
+                    EmploymentStatus == 'Full-time' | 
+                    EmploymentStatus == 'Part-time' | 
+                    EmploymentStatus == 'Self-employed' )
+df.empl <- subset(df.empl, IncomeRangeOrdered != "Not employed" & 
+                    IncomeRangeOrdered != "Not displayed")
+
+ggplot(aes(x = EmploymentStatusDuration, y = ..density.., color = IncomeRange), 
+       data = df.empl) +
+  scale_x_log10() +
+  geom_freqpoly(bins = 12)
+
+```
+
+
+Lower income ranges have much higher APRs. After 2012 they even increased,
+while for higher income ranges APRs decreased and ceased to exist after 2013.
+
+```{r}
+
+# yearly change of apr by income (color)
+ggplot(aes(x = Year, y = BorrowerAPR, color = IncomeRangeOrdered), 
+       data = subset(df, IncomeRangeOrdered != 'Not displayed')) +
+  geom_line(stat = 'summary', fun.y = mean) +
+  scale_x_continuous(limits = c(2007, 2014), breaks = seq(2007, 2014, 1))
+
+```
+
+Linear Model for score
+
+```{r}
+
+# build linear model (multinomial)
+m1 <- lm(BorrowerAPR ~ ProsperScore, data = df)
+m2 <- update(m1, ~ . + LoanOriginalAmount)
+m3 <- update(m2, ~ . + Year)
+m4 <- update(m3, ~ . + EmploymentStatus)
+m5 <- update(m4, ~ . + BankcardUtilization)
+m6 <- update(m5, ~ . + IncomeRange)
+m7 <- update(m6, ~ . + Month)
+m8 <- update(m7, ~ . + Term)
+m9 <- update(m8, ~ . + CurrentDelinquencies)
+m10 <- update(m9, ~ . + DebtToIncomeRatio)
+m11 <- update(m10, ~ . + CurrentlyInGroup)
+m12 <- update(m11, ~ . + IsBorrowerHomeowner)
+mtable(m1, m2, m3, m4, m5, m6, m7, m8, m10, m11, m12)
+
+```
+
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the \
+investigation. Were there features that strengthened each other in terms of \
+looking at your feature(s) of interest?
+
+Conducting multivariate analyses it becomes even clearer that based on how high
+the income is, the loans are higher and have lower rates. The plots also
+visualise how the rates and amounts changed over the years.
+It could also be credit card utilisation patterns vary within different income 
+groups.
+
+### Were there any interesting or surprising interactions between features?
+Prosper did not differentiate before 2007 and does not have any borrowers with
+zero income on unemployment status after as of 2013 (maybe because they did not
+allow any loans for this group.) 
+
+
+### OPTIONAL: Did you create any models with your dataset? Discuss the \
+strengths and limitations of your model.
+
+The multinomial linear regression model takes into account 12 different 
+variables and achieves an R^2 of 0.645 for predicting BorrowerAPR. It only looks
+at linear relationships of variables. Therefore, performance of the model could 
+be improved, by looking at non-linear relations between variables. Also,
+advanced feature engineering and cleaning of the data set and adding more 
+variables could improve performance.
+
+------
+
+# Final Plots and Summary
+
+### Plot One
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Number of Loans by Month (removed incomplete years)
+ggplot(aes(x = Month), data = subset(df, Year < 2014 & Year > 2006)) +
+  geom_histogram(stat = 'count', binwidth = 1) +
+  xlab("Month") +
+  ylab ("Number of Loans taken out (n)") +
+  ggtitle("Monthly Distribution of Loans")
+
+```
+
+### Description One
+Most loans are being taken out during the end of the year. This is quite
+interesting and can have several reasons. The most intuitive one is that people
+have plans for the following year and therefore borrow money. Another theory
+might be that people run out of money during the end of the year and need to
+borrow.
+
+### Plot Two
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Distribution of BorrowerAPR, by Income Range
+# bps are basic points
+ggplot(aes(x = IncomeRangeOrdered, y = BorrowerAPR), data = df) +
+  geom_boxplot() +
+  stat_summary(fun.y = mean, geom = 'point', shape = 4, size = 3,
+               aes(color = "Mean")) +
+  scale_color_manual('', values = c("Mean" = 'red')) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1)) +
+  xlab("Income Range ($)") +
+  ylab("Borrower APR (bps)") +
+  ggtitle("Distribution of BorrowerAPR, by Income Range") +
+  coord_flip()
+
+```
+
+### Description Two
+The BorrowerAPR is highly dependent on the income range. Having more income
+makes it more likely to get a better rate. On the other hand, having lower
+income increases the chances to get a worse rate. There is an exception with
+earning $0. This group could include students who get cheaper student loans.
+
+### Plot Three
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# 
+ggplot(aes(x = Year, y = BorrowerAPR * 100, color = IncomeRangeOrdered), 
+       data = subset(df, IncomeRangeOrdered != 'Not displayed')) +
+  geom_line(stat = 'summary', fun.y = mean) +
+  scale_x_continuous(limits = c(2007, 2014), breaks = seq(2007, 2014, 1)) +
+  xlab("Year") +
+  ylab("BorrowerAPR [%]")
+
+```
+
+### Description Three
+This plot shows the chronological sequence of the APR based on the borrowers'
+income ranges. It can be seen that the overall rate increases until 2011 and
+subsequently drops, except for low earners and unemployed borrowers who cease
+to exist in the data set as of 2013.
+
+
+------
+
+# Reflection
+
+This data analysis included the behaviour of various borrowers based on
+various features. Insight was gained, especially considering the borrowers'
+employment statuses, income ranges, credit card utilisation and use of loans.
+Finally, a model was generated to predict borrowers rates based on 12 of their
+characteristics.
+
+The dataset was challenging to some extent. As it includes approx. 80 variables
+a lot of work was initially pu into understanding the dataset and looking at 
+different variables. Ggpairs on a short list of features was especially helpful
+and also using the spreadsheet supported with getting a better grasp on the
+different features.
+
+Additionally, some of the struggles included having to deal with features which
+were not internally congruent, e.g. income range, which included "Not employed",
+even though this should have been part of "Employment Status" only. Also,
+different values of "Employment Status" did not have the same quality. While,
+"Employed" and "Unemployed" are contrary, "Full-time" and "Part-time" are 
+subsets of "Employed" and cannot be directly compared with "Employed".
+
+On the other hand, it was suprising to see, how the different features 
+influence the BorrowerAPR (e.g. Score and Income Range). It was also suprising
+that low-income and unemployed borrowers ceased to exist in the data set as of
+2013.
+
+Further cleaning, feature engineering and exploring more variables could be 
+taken into account in order to gain further insights and build more powerful
+models. For example, it could be explored, which estimated values (e.g. 
+EstimatedLoss, EstimatedReturn, EstimatedYield ...) have on the model or what 
+impact variables such as Occupation or CurrentlyInAGroup have. Also, it
+could be analysed, if the performance of the model changes, when getting rid
+of the pre-2007 values, which do not have different income ranges incorprated.
+Further features could be engineered and used for prediction, e.g. ratios
+between features such as Credit Lines by Delinquencies. Finally, it could be
+analysed if non-linear assumptions or higher-range functions of features
+generate better model results.
